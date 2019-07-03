@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package com.codnos;
+
+message Data {
+    repeated bytes values = 1;
+}
+
+message User {
+    string name = 1;
+    string favorite_color = 2;
+    int32 salary_precision = 3;
+    repeated string salary_structure = 4;
+    map<string, Data> salaries = 5;
+}
+
+message UserList {
+    repeated User users = 1;
+}
