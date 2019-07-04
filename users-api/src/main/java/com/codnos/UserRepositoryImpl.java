@@ -12,8 +12,8 @@ import com.couchbase.client.java.document.json.JsonObject;
 import com.couchbase.client.java.query.AsyncN1qlQueryRow;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
-import hu.akarnokd.rxjava.interop.RxJavaInterop;
 import rx.Observable;
+import rx.RxReactiveStreams;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -55,7 +55,7 @@ public class UserRepositoryImpl implements UserRepository {
                 )
                 .map(AsyncN1qlQueryRow::value)
                 .map(this::toUser);
-        return Source.fromPublisher(RxJavaInterop.toV2Flowable(users));
+        return Source.fromPublisher(RxReactiveStreams.toPublisher(users));
     }
 
     private CouchbaseUser toUser(JsonObject d) {
