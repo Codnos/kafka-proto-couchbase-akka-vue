@@ -16,39 +16,57 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 public class ReadFromApi {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
         ActorSystem system = ActorSystem.create("read");
         final ActorMaterializer materializer = ActorMaterializer.create(system);
         HttpRequest request = HttpRequest.create("http://localhost:8080/api/users").addHeader(new AcceptHeader("application/x-protobuf"));
-        Http.get(system)
+        CompletionStage<String> fut = Http.get(system)
                 .singleRequest(request, materializer)
-                .thenAccept(response -> {
+                .handle((response, responseException) -> {
+                    if (responseException != null) {
+                        responseException.printStackTrace();
+                        system.terminate();
+                        return "ERROR";
+                    }
+
                     if (response.status().isFailure()) {
                         System.out.println("Got " + response.status());
                         response.entity().toStrict(10000L, materializer).thenAccept(r ->
                                 System.out.println(r.getData().utf8String()));
+                        system.terminate();
+                        return "HTTP_ERROR";
                     } else {
-                        response.entity().toStrict(10000L, materializer)
-                                .thenAccept(r -> {
-                                    try {
-                                        ByteBuffer byteBuffer = r.getData().asByteBuffer();
-                                        Users.UserList userList = Users.UserList.parseFrom(ByteString.copyFrom(byteBuffer));
-                                        for (Users.User user : userList.getUsersList()) {
-                                            System.out.println(user);
-                                            System.out.println(toMapOfBinaries(user.getSalariesMap(), user.getSalaryPrecision()));
+                        response.entity().toStrict(10000L, materializer).whenComplete((r, t) -> {
+                                    if (t == null) {
+                                        try {
+                                            ByteBuffer byteBuffer = r.getData().asByteBuffer();
+                                            Users.UserList userList = Users.UserList.parseFrom(ByteString.copyFrom(byteBuffer));
+                                            for (Users.User user : userList.getUsersList()) {
+                                                System.out.println(user);
+                                                System.out.println(toMapOfBinaries(user.getSalariesMap(), user.getSalaryPrecision()));
+                                            }
+                                        } catch (Exception e) {
+                                            e.printStackTrace();
+                                        } finally {
+                                            system.terminate();
                                         }
-                                        system.terminate();
-                                    } catch (Exception e) {
-                                        e.printStackTrace();
+                                    } else {
+                                        t.printStackTrace();
                                         system.terminate();
                                     }
-                                });
+                                }
+                        );
+                        return "OK";
                     }
                 });
-        System.out.println("run...");
+
+        String result = fut.toCompletableFuture().get();
+        System.out.println("run... with result: "+ result);
     }
 
 
