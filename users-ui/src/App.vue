@@ -1,5 +1,5 @@
 <template>
-  <div id="app" class="App">
+  <div class="App">
     <div class="App-header">
         <img class="App-logo" src="./assets/logo.png"/>
         <div class="App-title">Users-UI</div>
@@ -34,6 +34,13 @@ export default {
 </script>
 
 <style>
+body {
+  margin: 0;
+  padding: 0;
+  font-family: sans-serif;
+}
+
+
 .App {
   text-align: center;
 }
