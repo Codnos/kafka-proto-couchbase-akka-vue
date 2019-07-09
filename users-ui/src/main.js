@@ -1,7 +1,7 @@
 import Vue from 'vue'
 import VueRouter from 'vue-router'
 import App from './App.vue'
-import Users from './Users.vue'
+import UserList from './UserList.vue'
 
 Vue.config.productionTip = false
 Vue.use(VueRouter)
@@ -13,11 +13,11 @@ const About = { template: '<div><h2>About</h2></div>' }
 const routes = [
   { path: '/', component: Home },
   { path: '/about', component: About },
-  { path: '/users', component: Users },
+  { path: '/users', component: UserList },
 ]
 
 const router = new VueRouter({
-  routes // short for `routes: routes`
+  routes
 })
 
 new Vue({
