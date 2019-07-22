@@ -8,17 +8,22 @@
           {{ error }}
         </div>
 
-        <div v-if="userList" class="content">
-          <h2>{{ JSON.stringify(userList) }}</h2>
-        </div>
+        <vuetable ref="vuetable"
+            :api-mode="false"
+            :fields="['name']"
+            :data="userList"
+          ></vuetable>
     </div>
 </template>
 
 <script>
+import Vuetable from 'vuetable-2/src/components/Vuetable'
+
 export default {
     name: 'users',
         components: {
-    },
+            Vuetable
+        },
     data() {
       return {
         loading: false,

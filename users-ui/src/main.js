@@ -2,6 +2,7 @@ import Vue from 'vue'
 import VueRouter from 'vue-router'
 import App from './App.vue'
 import UserList from './UserList.vue'
+import 'semantic-ui-css/semantic.min.css';
 
 Vue.config.productionTip = false
 Vue.use(VueRouter)

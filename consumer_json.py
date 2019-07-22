@@ -1,11 +1,11 @@
-import urllib.request
+import urllib2
 import json
 import pandas as pd
 
 url = "http://localhost:8080/api/users"
 headers = {"Accept": "application/json"}
-request = urllib.request.Request(url, headers=headers)
-response = urllib.request.urlopen(request)
+request = urllib2.Request(url, headers=headers)
+response = urllib2.urlopen(request)
 data = json.loads(response.read())
 print(data)
 
