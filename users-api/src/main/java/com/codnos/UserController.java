@@ -11,8 +11,11 @@ import akka.http.javadsl.model.RequestEntity;
 import akka.http.javadsl.server.AllDirectives;
 import akka.http.javadsl.server.Rejections;
 import akka.http.javadsl.server.Route;
+import akka.http.javadsl.unmarshalling.Unmarshaller;
 import akka.http.scaladsl.common.EntityStreamingSupport;
 import akka.http.scaladsl.model.ContentType$;
+import akka.japi.Pair;
+import akka.japi.tuple.Tuple3;
 import akka.stream.ActorMaterializer;
 import akka.stream.Attributes;
 import akka.stream.FlowShape;
@@ -34,6 +37,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -51,41 +55,90 @@ public class UserController extends AllDirectives {
     }
 
     public Route createRoute() {
+        return concat(
+                userRoutes(),
+                fileUploads()
+        );
+    }
+
+    private Route userRoutes() {
         akka.http.scaladsl.model.MediaType.Compressibility comp = akka.http.scaladsl.model.MediaType.NotCompressible$.MODULE$;
         akka.http.scaladsl.model.MediaType.Binary proto = akka.http.scaladsl.model.MediaType.applicationBinary("x-protobuf", comp, JavaConverters.asScalaBuffer(Collections.<String>emptyList()));
         akka.http.scaladsl.model.MediaType.WithOpenCharset json = akka.http.scaladsl.model.MediaType.applicationWithOpenCharset("json", JavaConverters.asScalaBuffer(Collections.<String>emptyList()));
         ContentType protoContent = ContentType$.MODULE$.apply(proto);
-        return route(
-                get(() ->
-                        pathPrefix("api", () ->
-                                path(segment("user").slash(segment()), (String userId) ->
-                                        completeOKWithFuture(userRepository.find(userId), Jackson.marshaller())
-                                ).orElse(
-                                        path("users", () ->
-                                                extract(r -> r.getRequest().getHeaders(), (headers) -> {
-                                                            java.util.Optional<HttpHeader> accept = StreamSupport.stream(headers.spliterator(), false).filter(h -> h.is("accept"))
-                                                                    .findFirst();
-                                                            String acceptedListAsString = accept.map(HttpHeader::value).orElse("");
-                                                            List<String> accepted = Arrays.stream(acceptedListAsString.split(",")).map(String::trim).collect(Collectors.toList());
-                                                            if (accepted.contains("application/json")) {
-                                                                return completeOKWithSource(userRepository.findAll(), Jackson.marshaller(), EntityStreamingSupport.json());
-                                                            } else if (accepted.contains("application/x-protobuf")) {
-                                                                SerializeAllToProtobuf x = new SerializeAllToProtobuf();
-                                                                CompletionStage<byte[]> result = userRepository.findAll().via(x).runWith(Sink.head(), materializer);
-                                                                Marshaller<byte[], RequestEntity> marshaller = Marshaller.withFixedContentType(protoContent, bytes -> HttpEntities.create(protoContent, bytes));
-                                                                return completeOKWithFuture(result, marshaller);
-                                                            } else {
-                                                                Iterable<MediaType> supported = asList(proto, json);
-                                                                return reject(Rejections.unsupportedRequestContentType(supported));
-                                                            }
-                                                        }
-                                                )
+        return get(() ->
+                pathPrefix("api", () ->
+                        path(segment("user").slash(segment()), (String userId) ->
+                                completeOKWithFuture(userRepository.find(userId), Jackson.marshaller())
+                        ).orElse(
+                                path("users", () ->
+                                        extract(r -> r.getRequest().getHeaders(), (headers) -> {
+                                                    java.util.Optional<HttpHeader> accept = StreamSupport.stream(headers.spliterator(), false).filter(h -> h.is("accept"))
+                                                            .findFirst();
+                                                    String acceptedListAsString = accept.map(HttpHeader::value).orElse("");
+                                                    List<String> accepted = Arrays.stream(acceptedListAsString.split(",")).map(String::trim).collect(Collectors.toList());
+                                                    if (accepted.contains("application/json")) {
+                                                        return completeOKWithSource(userRepository.findAll(), Jackson.marshaller(), EntityStreamingSupport.json());
+                                                    } else if (accepted.contains("application/x-protobuf")) {
+                                                        SerializeAllToProtobuf x = new SerializeAllToProtobuf();
+                                                        CompletionStage<byte[]> result = userRepository.findAll().via(x).runWith(Sink.head(), materializer);
+                                                        Marshaller<byte[], RequestEntity> marshaller = Marshaller.withFixedContentType(protoContent, bytes -> HttpEntities.create(protoContent, bytes));
+                                                        return completeOKWithFuture(result, marshaller);
+                                                    } else {
+                                                        Iterable<MediaType> supported = asList(proto, json);
+                                                        return reject(Rejections.unsupportedRequestContentType(supported));
+                                                    }
+                                                }
                                         )
                                 )
                         )
-                ));
+                )
+        );
     }
 
+    private Pair<Long, Long> receiveChunk(AtomicLong lastReport, AtomicLong lastSize, Pair<Long, Long> counter, akka.util.ByteString chunk) {
+        Long oldSize = counter.first();
+        Long oldChunks = counter.second();
+        long newSize = oldSize + chunk.size();
+        long newChunks = oldChunks + 1;
+
+        long now = System.currentTimeMillis();
+        if (now > lastReport.get() + 10) {
+            long lastedTotal = now - lastReport.get();
+            long bytesSinceLast = newSize - lastSize.get();
+            double speedMBPS = (double)bytesSinceLast / 1000000 /* bytes per MB */ / lastedTotal * 1000 /* millis per second */;
+
+            System.out.println("Already got " + newChunks+ " chunks with total size " + newSize +" bytes avg chunksize " + (newSize / newChunks) + " bytes/chunk speed: " + speedMBPS +" MB/s");
+
+            lastReport.set(now);
+            lastSize.set(newSize);
+        }
+        return Pair.create(newSize, newChunks);
+    }
+
+    private Route fileUploads() {
+        return path("upload", () -> {
+            return entity(Unmarshaller.entityToMultipartFormData(), formData -> {
+                CompletionStage<String> fileNamesFuture = formData.getParts().mapAsync(1, p -> {
+                    System.out.println("Got part. name: " + p.getName() + " filename: " + p.getFilename());
+
+                    System.out.println("Counting size...");
+                    final AtomicLong lastReport = new AtomicLong(System.currentTimeMillis());
+                    final AtomicLong lastSize = new AtomicLong(0L);
+                    Pair<Long, Long> zero = Pair.create(0L, 0L);
+                    return p.getEntity()
+                            .getDataBytes()
+                            .runFold(zero, (acc, curr) -> receiveChunk(lastReport, lastSize, acc, curr), materializer)
+                            .toCompletableFuture()
+                            .thenApply(stat -> {
+                                System.out.println("Size is:" + stat.first() + " in chunks:" + stat.second());
+                                return Tuple3.create(p.getName(), p.getFilename(), stat.first());
+                            });
+                }).runFold("", (acc, curr) -> acc + curr, materializer);
+                return completeOKWithFutureString(fileNamesFuture);
+            });
+        });
+    }
 
     public class SerializeAllToProtobuf extends GraphStage<FlowShape<CouchbaseUser, byte[]>> {
 
